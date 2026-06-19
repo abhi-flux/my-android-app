@@ -72,6 +72,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         talkButton.setOnClickListener(v -> checkPermissionAndListen());
+        Button memoriesButton = findViewById(R.id.memoriesButton);
+        memoriesButton.setOnClickListener(v -> startActivity(new Intent(this, FactsActivity.class)));
     }
 
     private void checkPermissionAndListen() {
