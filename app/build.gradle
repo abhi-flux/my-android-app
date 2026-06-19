@@ -13,7 +13,7 @@ android {
         versionCode 1
         versionName "1.0"
 
-        buildConfigField "String", "GEMINI_API_KEY", "\"${project.findProperty('apiKey') ?: ''}\""
+        buildConfigField "String", "NVIDIA_API_KEY", "\"${project.findProperty('apiKey') ?: ''}\""
     }
 
     buildTypes {
