@@ -23,6 +23,13 @@
         android:layout_height="wrap_content"
         android:text="Talk to Sunday" />
 
+    <Button
+        android:id="@+id/memoriesButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="View Memories" />
+
     <TextView
         android:id="@+id/responseText"
         android:layout_width="match_parent"
