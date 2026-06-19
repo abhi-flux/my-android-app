@@ -115,7 +115,7 @@ public class MainActivity extends AppCompatActivity {
                         body.toString(), MediaType.parse("application/json"));
 
                 Request request = new Request.Builder()
-                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="
+                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key="
                                 + BuildConfig.GEMINI_API_KEY)
                         .post(requestBody)
                         .build();
