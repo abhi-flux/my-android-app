@@ -16,5 +16,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".FactsActivity"
+            android:exported="false"
+            android:label="Sunday's Memories" />
     </application>
 </manifest>
