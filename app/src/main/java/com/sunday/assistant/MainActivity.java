@@ -72,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         talkButton.setOnClickListener(v -> checkPermissionAndListen());
+
         Button memoriesButton = findViewById(R.id.memoriesButton);
         memoriesButton.setOnClickListener(v -> startActivity(new Intent(this, FactsActivity.class)));
     }
@@ -150,7 +151,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         responseText.setText("You said: " + spokenText + "\n\nThinking...");
-        askGemini(spokenText);
+        askAI(spokenText);
     }
 
     private void speakAndShow(String text) {
@@ -160,7 +161,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void askGemini(String prompt) {
+    private void askAI(String prompt) {
         new Thread(() -> {
             try {
                 db.saveMessage("user", prompt);
@@ -174,22 +175,29 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
-                JSONObject systemInstruction = new JSONObject()
-                        .put("parts", new JSONArray().put(
-                                new JSONObject().put("text", SYSTEM_PROMPT + factsText)));
+                JSONArray messages = new JSONArray();
+                messages.put(new JSONObject()
+                        .put("role", "system")
+                        .put("content", SYSTEM_PROMPT + factsText));
 
                 JSONArray history = db.getRecentHistory(200);
+                for (int i = 0; i < history.length(); i++) {
+                    messages.put(history.get(i));
+                }
 
                 JSONObject body = new JSONObject()
-                        .put("system_instruction", systemInstruction)
-                        .put("contents", history);
+                        .put("model", "deepseek-ai/deepseek-v4-flash")
+                        .put("messages", messages)
+                        .put("chat_template_kwargs", new JSONObject()
+                                .put("thinking", true)
+                                .put("reasoning_effort", "low"));
 
                 RequestBody requestBody = RequestBody.create(
                         body.toString(), MediaType.parse("application/json"));
 
                 Request request = new Request.Builder()
-                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key="
-                                + BuildConfig.GEMINI_API_KEY)
+                        .url("https://integrate.api.nvidia.com/v1/chat/completions")
+                        .addHeader("Authorization", "Bearer " + BuildConfig.NVIDIA_API_KEY)
                         .post(requestBody)
                         .build();
 
@@ -202,14 +210,19 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                         String raw = response.body() != null ? response.body().string() : "";
+
+                        if (response.code() == 429) {
+                            runOnUiThread(() -> responseText.setText(
+                                    "Sunday's catching his breath, try again in a few seconds..."));
+                            return;
+                        }
+
                         try {
                             JSONObject json = new JSONObject(raw);
-                            String answer = json.getJSONArray("candidates")
+                            String answer = json.getJSONArray("choices")
                                     .getJSONObject(0)
-                                    .getJSONObject("content")
-                                    .getJSONArray("parts")
-                                    .getJSONObject(0)
-                                    .getString("text");
+                                    .getJSONObject("message")
+                                    .getString("content");
 
                             db.saveMessage("model", answer);
 
