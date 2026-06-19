@@ -21,6 +21,7 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 import okhttp3.Call;
@@ -36,8 +37,22 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQ_RECORD_AUDIO = 1;
     private static final int REQ_SPEECH = 2;
 
+    private static final String SYSTEM_PROMPT =
+            "You are Sunday, Abhi's personal AI assistant running on his Android phone. " +
+            "Your name is Sunday. Always remember this and answer as Sunday when asked your name. " +
+            "Keep answers concise and conversational.";
+
+    private static final String[] REMEMBER_TRIGGERS = {
+            "remember that ", "remember ", "don't forget that ", "don't forget ", "from now on "
+    };
+
+    private static final String[] FORGET_TRIGGERS = {
+            "forget that ", "forget about ", "forget "
+    };
+
     private TextView responseText;
     private TextToSpeech tts;
+    private SundayDatabase db;
     private final OkHttpClient client = new OkHttpClient();
 
     @Override
@@ -47,6 +62,8 @@ public class MainActivity extends AppCompatActivity {
 
         responseText = findViewById(R.id.responseText);
         Button talkButton = findViewById(R.id.talkButton);
+
+        db = new SundayDatabase(this);
 
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
@@ -97,19 +114,73 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == REQ_SPEECH && resultCode == Activity.RESULT_OK && data != null) {
             ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             if (results != null && !results.isEmpty()) {
-                String spokenText = results.get(0);
-                responseText.setText("You said: " + spokenText + "\n\nThinking...");
-                askGemini(spokenText);
+                handleSpokenInput(results.get(0));
             }
+        }
+    }
+
+    private void handleSpokenInput(String spokenText) {
+        String lower = spokenText.toLowerCase(Locale.US).trim();
+
+        for (String trigger : REMEMBER_TRIGGERS) {
+            if (lower.startsWith(trigger)) {
+                String fact = spokenText.substring(trigger.length()).trim();
+                if (!fact.isEmpty()) {
+                    db.saveFact(fact);
+                    speakAndShow("Got it. I'll remember that " + fact);
+                    return;
+                }
+            }
+        }
+
+        for (String trigger : FORGET_TRIGGERS) {
+            if (lower.startsWith(trigger)) {
+                String phrase = spokenText.substring(trigger.length()).trim();
+                String match = db.findClosestFact(phrase);
+                if (match != null) {
+                    db.deleteFact(match);
+                    speakAndShow("Okay, I've forgotten that " + match);
+                } else {
+                    speakAndShow("I couldn't find a memory matching that.");
+                }
+                return;
+            }
+        }
+
+        responseText.setText("You said: " + spokenText + "\n\nThinking...");
+        askGemini(spokenText);
+    }
+
+    private void speakAndShow(String text) {
+        responseText.setText(text);
+        if (tts != null) {
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sundayResponse");
         }
     }
 
     private void askGemini(String prompt) {
         new Thread(() -> {
             try {
-                JSONObject part = new JSONObject().put("text", prompt);
-                JSONObject content = new JSONObject().put("parts", new JSONArray().put(part));
-                JSONObject body = new JSONObject().put("contents", new JSONArray().put(content));
+                db.saveMessage("user", prompt);
+
+                List<String> facts = db.getAllFacts();
+                StringBuilder factsText = new StringBuilder();
+                if (!facts.isEmpty()) {
+                    factsText.append(" Permanent facts you must always remember about the user: ");
+                    for (String f : facts) {
+                        factsText.append("- ").append(f).append(". ");
+                    }
+                }
+
+                JSONObject systemInstruction = new JSONObject()
+                        .put("parts", new JSONArray().put(
+                                new JSONObject().put("text", SYSTEM_PROMPT + factsText)));
+
+                JSONArray history = db.getRecentHistory(200);
+
+                JSONObject body = new JSONObject()
+                        .put("system_instruction", systemInstruction)
+                        .put("contents", history);
 
                 RequestBody requestBody = RequestBody.create(
                         body.toString(), MediaType.parse("application/json"));
@@ -137,6 +208,9 @@ public class MainActivity extends AppCompatActivity {
                                     .getJSONArray("parts")
                                     .getJSONObject(0)
                                     .getString("text");
+
+                            db.saveMessage("model", answer);
+
                             runOnUiThread(() -> {
                                 responseText.setText(answer);
                                 if (tts != null) {
