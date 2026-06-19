@@ -70,11 +70,11 @@ public class SundayDatabase extends SQLiteOpenHelper {
 
         for (int i = rows.size() - 1; i >= 0; i--) {
             try {
-                JSONObject part = new JSONObject().put("text", rows.get(i)[1]);
-                JSONObject content = new JSONObject()
-                        .put("role", rows.get(i)[0])
-                        .put("parts", new JSONArray().put(part));
-                history.put(content);
+                String role = rows.get(i)[0].equals("model") ? "assistant" : rows.get(i)[0];
+                JSONObject entry = new JSONObject()
+                        .put("role", role)
+                        .put("content", rows.get(i)[1]);
+                history.put(entry);
             } catch (Exception ignored) {}
         }
         return history;
