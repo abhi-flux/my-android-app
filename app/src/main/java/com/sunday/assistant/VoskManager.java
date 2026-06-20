@@ -9,6 +9,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -30,7 +31,11 @@ public class VoskManager {
     }
 
     private final Context context;
-    private final OkHttpClient client = new OkHttpClient();
+    private final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build();
 
     public VoskManager(Context context) {
         this.context = context;
@@ -55,7 +60,7 @@ public class VoskManager {
     }
 
     private void downloadModel(ModelCallback callback) {
-        callback.onProgress("Downloading voice model (~40MB)...");
+        callback.onProgress("Connecting...");
 
         Request request = new Request.Builder().url(MODEL_URL).build();
         client.newCall(request).enqueue(new Callback() {
@@ -67,18 +72,36 @@ public class VoskManager {
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 if (!response.isSuccessful() || response.body() == null) {
-                    callback.onError("Download failed: server error");
+                    callback.onError("Download failed: server error " + response.code());
                     return;
                 }
 
+                long totalBytes = response.body().contentLength();
                 File zipFile = new File(context.getFilesDir(), "vosk-model.zip");
+
                 try (InputStream in = response.body().byteStream();
                      FileOutputStream out = new FileOutputStream(zipFile)) {
                     byte[] buffer = new byte[8192];
+                    long downloaded = 0;
+                    int lastPercent = -1;
                     int len;
                     while ((len = in.read(buffer)) != -1) {
                         out.write(buffer, 0, len);
+                        downloaded += len;
+                        if (totalBytes > 0) {
+                            int percent = (int) ((downloaded * 100) / totalBytes);
+                            if (percent != lastPercent) {
+                                lastPercent = percent;
+                                callback.onProgress("Downloading voice model... " + percent + "% (" +
+                                        (downloaded / 1024 / 1024) + "MB / " + (totalBytes / 1024 / 1024) + "MB)");
+                            }
+                        } else {
+                            callback.onProgress("Downloading voice model... " + (downloaded / 1024 / 1024) + "MB");
+                        }
                     }
+                } catch (IOException e) {
+                    callback.onError("Download interrupted: " + e.getMessage());
+                    return;
                 }
 
                 callback.onProgress("Unpacking voice model...");
