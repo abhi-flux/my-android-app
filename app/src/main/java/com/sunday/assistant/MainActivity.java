@@ -186,18 +186,14 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 JSONObject body = new JSONObject()
-                        .put("model", "deepseek-ai/deepseek-v4-flash")
-                        .put("messages", messages)
-                        .put("chat_template_kwargs", new JSONObject()
-                                .put("thinking", true)
-                                .put("reasoning_effort", "low"));
+                        .put("model", "local")
+                        .put("messages", messages);
 
                 RequestBody requestBody = RequestBody.create(
                         body.toString(), MediaType.parse("application/json"));
 
                 Request request = new Request.Builder()
-                        .url("https://integrate.api.nvidia.com/v1/chat/completions")
-                        .addHeader("Authorization", "Bearer " + BuildConfig.NVIDIA_API_KEY)
+                        .url("http://127.0.0.1:8080/v1/chat/completions")
                         .post(requestBody)
                         .build();
 
