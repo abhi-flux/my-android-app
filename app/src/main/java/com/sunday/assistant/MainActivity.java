@@ -75,6 +75,7 @@ public class MainActivity extends AppCompatActivity {
 
         Button memoriesButton = findViewById(R.id.memoriesButton);
         memoriesButton.setOnClickListener(v -> startActivity(new Intent(this, FactsActivity.class)));
+
         Button wakeWordButton = findViewById(R.id.wakeWordButton);
         VoskManager voskManager = new VoskManager(this);
         wakeWordButton.setOnClickListener(v -> {
