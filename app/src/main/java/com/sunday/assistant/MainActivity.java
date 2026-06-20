@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -18,6 +19,10 @@ import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.vosk.Model;
+import org.vosk.Recognizer;
+import org.vosk.android.RecognitionListener;
+import org.vosk.android.SpeechService;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,8 +56,13 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private TextView responseText;
+    private Button wakeWordButton;
     private TextToSpeech tts;
     private SundayDatabase db;
+    private VoskManager voskManager;
+    private Model voskModel;
+    private SpeechService speechService;
+    private boolean wakeWordModeOn = false;
     private final OkHttpClient client = new OkHttpClient();
 
     @Override
@@ -64,6 +74,7 @@ public class MainActivity extends AppCompatActivity {
         Button talkButton = findViewById(R.id.talkButton);
 
         db = new SundayDatabase(this);
+        voskManager = new VoskManager(this);
 
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
@@ -71,32 +82,130 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+            @Override
+            public void onStart(String utteranceId) {}
+
+            @Override
+            public void onDone(String utteranceId) {
+                if ("sundayResponse".equals(utteranceId) && wakeWordModeOn) {
+                    runOnUiThread(MainActivity.this::startWakeWordListening);
+                }
+            }
+
+            @Override
+            public void onError(String utteranceId) {}
+        });
+
         talkButton.setOnClickListener(v -> checkPermissionAndListen());
 
         Button memoriesButton = findViewById(R.id.memoriesButton);
         memoriesButton.setOnClickListener(v -> startActivity(new Intent(this, FactsActivity.class)));
 
-        Button wakeWordButton = findViewById(R.id.wakeWordButton);
-        VoskManager voskManager = new VoskManager(this);
-        wakeWordButton.setOnClickListener(v -> {
-            responseText.setText("Setting up wake word...");
-            voskManager.setupModel(new VoskManager.ModelCallback() {
-                @Override
-                public void onProgress(String message) {
-                    runOnUiThread(() -> responseText.setText(message));
-                }
+        wakeWordButton = findViewById(R.id.wakeWordButton);
+        wakeWordButton.setOnClickListener(v -> toggleWakeWordMode());
+    }
 
-                @Override
-                public void onReady(org.vosk.Model model) {
-                    runOnUiThread(() -> responseText.setText("Voice model ready! (Part 2 will add real listening)"));
-                }
+    private void toggleWakeWordMode() {
+        if (wakeWordModeOn) {
+            wakeWordModeOn = false;
+            stopWakeWordListening();
+            wakeWordButton.setText("Enable Wake Word");
+            responseText.setText("Wake word disabled.");
+            return;
+        }
 
-                @Override
-                public void onError(String error) {
-                    runOnUiThread(() -> responseText.setText("Error: " + error));
-                }
-            });
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD_AUDIO);
+            return;
+        }
+
+        responseText.setText("Setting up wake word...");
+        voskManager.setupModel(new VoskManager.ModelCallback() {
+            @Override
+            public void onProgress(String message) {
+                runOnUiThread(() -> responseText.setText(message));
+            }
+
+            @Override
+            public void onReady(Model model) {
+                voskModel = model;
+                runOnUiThread(() -> {
+                    wakeWordModeOn = true;
+                    wakeWordButton.setText("Disable Wake Word");
+                    startWakeWordListening();
+                });
+            }
+
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> responseText.setText("Error: " + error));
+            }
         });
+    }
+
+    private void startWakeWordListening() {
+        if (voskModel == null || speechService != null) return;
+        try {
+            Recognizer recognizer = new Recognizer(voskModel, 16000.0f);
+            speechService = new SpeechService(recognizer, 16000.0f);
+            speechService.startListening(wakeWordListener);
+            responseText.setText("Listening for \"Hey Sunday\"...");
+        } catch (IOException e) {
+            responseText.setText("Wake word listener failed: " + e.getMessage());
+        }
+    }
+
+    private void stopWakeWordListening() {
+        if (speechService != null) {
+            speechService.stop();
+            speechService.shutdown();
+            speechService = null;
+        }
+    }
+
+    private final RecognitionListener wakeWordListener = new RecognitionListener() {
+        @Override
+        public void onPartialResult(String hypothesis) {}
+
+        @Override
+        public void onResult(String hypothesis) {
+            checkForWakeWord(hypothesis);
+        }
+
+        @Override
+        public void onFinalResult(String hypothesis) {
+            checkForWakeWord(hypothesis);
+        }
+
+        @Override
+        public void onError(Exception exception) {
+            runOnUiThread(() -> responseText.setText("Wake word error: " + exception.getMessage()));
+        }
+
+        @Override
+        public void onTimeout() {
+            runOnUiThread(() -> {
+                stopWakeWordListening();
+                if (wakeWordModeOn) startWakeWordListening();
+            });
+        }
+    };
+
+    private void checkForWakeWord(String hypothesisJson) {
+        try {
+            JSONObject json = new JSONObject(hypothesisJson);
+            String text = json.optString("text", "");
+            if (text.toLowerCase(Locale.US).contains("sunday")) {
+                runOnUiThread(() -> {
+                    stopWakeWordListening();
+                    responseText.setText("Yes?");
+                    checkPermissionAndListen();
+                });
+            }
+        } catch (Exception ignored) {}
     }
 
     private void checkPermissionAndListen() {
@@ -130,17 +239,22 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(intent, REQ_SPEECH);
         } catch (Exception e) {
             Toast.makeText(this, "Speech recognition not available on this device", Toast.LENGTH_SHORT).show();
+            if (wakeWordModeOn) startWakeWordListening();
         }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_SPEECH && resultCode == Activity.RESULT_OK && data != null) {
-            ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            if (results != null && !results.isEmpty()) {
-                handleSpokenInput(results.get(0));
+        if (requestCode == REQ_SPEECH) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                if (results != null && !results.isEmpty()) {
+                    handleSpokenInput(results.get(0));
+                    return;
+                }
             }
+            if (wakeWordModeOn) startWakeWordListening();
         }
     }
 
@@ -222,7 +336,10 @@ public class MainActivity extends AppCompatActivity {
                 client.newCall(request).enqueue(new Callback() {
                     @Override
                     public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                        runOnUiThread(() -> responseText.setText("Network error: " + e.getMessage()));
+                        runOnUiThread(() -> {
+                            responseText.setText("Network error: " + e.getMessage());
+                            if (wakeWordModeOn) startWakeWordListening();
+                        });
                     }
 
                     @Override
@@ -230,8 +347,10 @@ public class MainActivity extends AppCompatActivity {
                         String raw = response.body() != null ? response.body().string() : "";
 
                         if (response.code() == 429) {
-                            runOnUiThread(() -> responseText.setText(
-                                    "Sunday's catching his breath, try again in a few seconds..."));
+                            runOnUiThread(() -> {
+                                responseText.setText("Sunday's catching his breath, try again in a few seconds...");
+                                if (wakeWordModeOn) startWakeWordListening();
+                            });
                             return;
                         }
 
@@ -251,18 +370,25 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             });
                         } catch (Exception ex) {
-                            runOnUiThread(() -> responseText.setText("Couldn't read response:\n" + raw));
+                            runOnUiThread(() -> {
+                                responseText.setText("Couldn't read response:\n" + raw);
+                                if (wakeWordModeOn) startWakeWordListening();
+                            });
                         }
                     }
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> responseText.setText("Error: " + e.getMessage()));
+                runOnUiThread(() -> {
+                    responseText.setText("Error: " + e.getMessage());
+                    if (wakeWordModeOn) startWakeWordListening();
+                });
             }
         }).start();
     }
 
     @Override
     protected void onDestroy() {
+        stopWakeWordListening();
         if (tts != null) {
             tts.stop();
             tts.shutdown();
