@@ -75,6 +75,27 @@ public class MainActivity extends AppCompatActivity {
 
         Button memoriesButton = findViewById(R.id.memoriesButton);
         memoriesButton.setOnClickListener(v -> startActivity(new Intent(this, FactsActivity.class)));
+        Button wakeWordButton = findViewById(R.id.wakeWordButton);
+        VoskManager voskManager = new VoskManager(this);
+        wakeWordButton.setOnClickListener(v -> {
+            responseText.setText("Setting up wake word...");
+            voskManager.setupModel(new VoskManager.ModelCallback() {
+                @Override
+                public void onProgress(String message) {
+                    runOnUiThread(() -> responseText.setText(message));
+                }
+
+                @Override
+                public void onReady(org.vosk.Model model) {
+                    runOnUiThread(() -> responseText.setText("Voice model ready! (Part 2 will add real listening)"));
+                }
+
+                @Override
+                public void onError(String error) {
+                    runOnUiThread(() -> responseText.setText("Error: " + error));
+                }
+            });
+        });
     }
 
     private void checkPermissionAndListen() {
